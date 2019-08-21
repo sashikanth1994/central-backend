@@ -2,7 +2,7 @@ const should = require('should');
 const config = require('config');
 const { DateTime } = require('luxon');
 const { testService } = require('../setup');
-const testData = require('../data');
+const testData = require('../../data/xml');
 
 describe('api: /projects/:id/forms', () => {
   describe('GET', () => {
@@ -107,6 +107,21 @@ describe('api: /projects/:id/forms', () => {
   <xforms xmlns="http://openrosa.org/xforms/xformsList">
   </xforms>`);
               }))))));
+
+    it('should escape illegal characters in url', testService((service) =>
+      service.login('alice', (asAlice) =>
+        asAlice.post('/v1/projects/1/forms')
+          .send(testData.forms.withAttachments.replace('withAttachments', 'with attachments'))
+          .set('Content-Type', 'application/xml')
+          .expect(200)
+          .then(() => asAlice.get('/v1/projects/1/formList')
+            .set('X-OpenRosa-Version', '1.0')
+            .expect(200)
+            .then(({ text }) => {
+              const domain = config.get('default.env.domain');
+              text.should.containEql(`<downloadUrl>${domain}/v1/projects/1/forms/with%20attachments.xml</downloadUrl>`);
+              text.should.containEql(`<manifestUrl>${domain}/v1/projects/1/forms/with%20attachments/manifest</manifestUrl>`);
+            })))));
 
     it('should include a manifest node for forms with attachments', testService((service) =>
       service.login('alice', (asAlice) =>
@@ -272,6 +287,16 @@ describe('api: /projects/:id/forms', () => {
             body.name.should.equal('Simple 2');
             body.version.should.equal('2.1');
             body.hash.should.equal('07ed8a51cc3f6472b7dfdc14c2005861');
+          }))));
+
+    it('should reject if form id is too long', testService((service) =>
+    service.login('alice', (asAlice) =>
+        asAlice.post('/v1/projects/1/forms')
+          .send(testData.forms.simple.replace(/id=".*"/i, 'id="simple_form_with_form_id_length_more_than_sixty_four_characters_long"'))
+          .set('Content-Type', 'application/xml')
+          .expect(400)
+          .then(({ body }) => {
+            body.code.should.equal(400.13);
           }))));
   });
 
@@ -464,6 +489,17 @@ describe('api: /projects/:id/forms', () => {
             body.xmlFormId.should.equal('simple');
             body.hash.should.equal('5c09c21d4c71f2f13f6aa26227b2d133');
           }))));
+
+    it('should return encrypted form keyId', testService((service) =>
+      service.login('alice', (asAlice) =>
+        asAlice.post('/v1/projects/1/key')
+          .send({ passphrase: 'encryptme' })
+          .expect(200)
+          .then(() => asAlice.get('/v1/projects/1/forms/simple')
+            .expect(200)
+            .then(({ body }) => {
+              body.keyId.should.be.a.Number();
+            })))));
 
     it('should return extended form details', testService((service) =>
       service.login('alice', (asAlice) =>
